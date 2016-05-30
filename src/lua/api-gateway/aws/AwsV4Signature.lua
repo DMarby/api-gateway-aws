@@ -17,6 +17,7 @@ function HmacAuthV4Handler:new(o)
     setmetatable(o, self)
     self.__index = self
     if ( o ~= nil) then
+        self.aws_endpoint = o.aws_endpoint
         self.aws_service = o.aws_service
         self.aws_region = o.aws_region
         self.aws_secret_key = o.aws_secret_key
@@ -27,6 +28,7 @@ function HmacAuthV4Handler:new(o)
         -- Different sigv4 services seem to be inconsistent on this. So for
         -- services that want to suppress this, they should set it to false.
         self.doubleUrlEncode = o.doubleUrlEncode or true
+        self.token = o.token
     end
     -- set amazon formatted dates
     local utc = ngx.utctime()
@@ -58,7 +60,8 @@ local function get_hashed_canonical_request(method, uri, querystring, headers, r
     -- add canonicalHeaders
     local canonicalHeaders = ""
     local signedHeaders = ""
-    for h_n,h_v in pairs(headers) do
+    for _, p in ipairs(headers) do
+        local h_n, h_v = p[1], p[2]
         -- todo: trim and lowercase
         canonicalHeaders = canonicalHeaders .. h_n .. ":" .. h_v .. "\n"
         signedHeaders = signedHeaders .. h_n .. ";"
@@ -69,13 +72,14 @@ local function get_hashed_canonical_request(method, uri, querystring, headers, r
     hash = hash .. canonicalHeaders .. "\n"
             .. signedHeaders .. "\n"
 
-    hash = hash .. _hash(requestPayload or "")
+    requestPayloadHash = _hash(requestPayload or "")
+    hash = hash .. requestPayloadHash
 
     ngx.log(ngx.DEBUG, "Canonical String to Sign is:\n" .. hash)
 
     local final_hash = _hash(hash)
     ngx.log(ngx.DEBUG, "Canonical String HASHED is:\n" .. final_hash .. "\n")
-    return final_hash
+    return final_hash, signedHeaders, requestPayloadHash
 end
 
 local function get_string_to_sign(algorithm, request_date, credential_scope, hashed_canonical_request)
@@ -151,21 +155,32 @@ function HmacAuthV4Handler:formatQueryString(uri_args)
     return uri
 end
 
-function HmacAuthV4Handler:getSignature(http_method, request_uri, uri_arg_table, request_payload )
+function HmacAuthV4Handler:getSignature(http_method, request_uri, uri_arg_table, request_payload, host_override)
     local uri_args = self:formatQueryString(uri_arg_table)
     local utc = ngx.utctime()
     local date1 = self.aws_date_short
     local date2 = self.aws_date
+    local host = self.aws_endpoint
+    if host_override ~= nil then
+        host = host_override
+    end
 
     local headers = {}
-    headers.host = self.aws_service .. "." .. self.aws_region .. ".amazonaws.com"
-    headers["x-amz-date"] = date2
+    table.insert(headers, {"host", host})
+    table.insert(headers, {"x-amz-date", date2})
+    if self.token ~= nil then
+        table.insert(headers, {"x-amz-security-token", self.token})
+    end
 
     local encoded_request_uri = request_uri
     if (self.doubleUrlEncode == true) then
         encoded_request_uri = urlEncode(request_uri)
     end
     -- ensure parameters in query string are in order
+    local hashed_canonical_request, signed_headers, request_payload_hash = get_hashed_canonical_request(
+        http_method, encoded_request_uri,
+        uri_args,
+        headers, request_payload)
     local sign = _sign( get_derived_signing_key( self.aws_secret_key,
         date1,
         self.aws_region,
@@ -173,18 +188,15 @@ function HmacAuthV4Handler:getSignature(http_method, request_uri, uri_arg_table,
         get_string_to_sign("AWS4-HMAC-SHA256",
             date2,
             date1 .. "/" .. self.aws_region .. "/" .. self.aws_service .. "/aws4_request",
-            get_hashed_canonical_request(
-                http_method, encoded_request_uri,
-                uri_args,
-                headers, request_payload) ) )
-    return sign
+            hashed_canonical_request) )
+    return sign, signed_headers, request_payload_hash
 end
 
-function HmacAuthV4Handler:getAuthorizationHeader(http_method, request_uri, uri_arg_table, request_payload )
-    local auth_signature = self:getSignature(http_method, request_uri, uri_arg_table, request_payload)
+function HmacAuthV4Handler:getAuthorizationHeader(http_method, request_uri, uri_arg_table, request_payload, host_override)
+    local auth_signature, signed_headers, request_payload_hash = self:getSignature(http_method, request_uri, uri_arg_table, request_payload, host_override)
     local authHeader = "AWS4-HMAC-SHA256 Credential=" .. self.aws_access_key.."/" .. self.aws_date_short .. "/" .. self.aws_region
-           .."/" .. self.aws_service.."/aws4_request,SignedHeaders=host;x-amz-date,Signature="..auth_signature
-    return authHeader
+           .."/" .. self.aws_service.."/aws4_request,SignedHeaders="..signed_headers..",Signature="..auth_signature
+    return authHeader, request_payload_hash
 end
 
 return HmacAuthV4Handler
