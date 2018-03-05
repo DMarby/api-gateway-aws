@@ -97,6 +97,7 @@ end
 -- o.shared_cache_dict - optional. AWSIAMCredentials uses it to store IAM Credentials.
 -- o.doubleUrlEncode - optional. Whether to double url-encode the resource path
 --                                when constructing the canonical request for AWSV4 signature.
+-- o.private - optional. Whether to set the access policy of the uploaded object to private.
 --
 -- NOTE: class inheirtance inspired from: http://www.lua.org/pil/16.2.html
 function _M:new(o)

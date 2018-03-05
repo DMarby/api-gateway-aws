@@ -29,6 +29,7 @@ function HmacAuthV4Handler:new(o)
         -- services that want to suppress this, they should set it to false.
         self.doubleUrlEncode = o.doubleUrlEncode or true
         self.token = o.token
+        self.private = o.private or false
     end
     -- set amazon formatted dates
     local utc = ngx.utctime()
@@ -167,6 +168,9 @@ function HmacAuthV4Handler:getSignature(http_method, request_uri, uri_arg_table,
 
     local headers = {}
     table.insert(headers, {"host", host})
+    if (self.private == true) then
+        table.insert(headers, {"x-amz-acl", "private"})
+    end
     table.insert(headers, {"x-amz-date", date2})
     if self.token ~= nil then
         table.insert(headers, {"x-amz-security-token", self.token})
