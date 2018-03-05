@@ -149,7 +149,11 @@ function HmacAuthV4Handler:formatQueryString(uri_args)
     local iterator = getTableIterator(uri_args, urlParameterKeys)
 
     for param_key, param_value in iterator do
-        uri = uri .. urlEncode(param_key) .. "=" .. urlEncode(param_value) .. "&"
+        if type(param_value) ~= "string" then
+            uri = uri .. urlEncode(param_key) .. "=&"
+        else
+            uri = uri .. urlEncode(param_key) .. "=" .. urlEncode(param_value) .. "&"
+        end
     end
     --remove the last "&" from the signedHeaders
     uri = string.sub(uri, 1, -2)
