@@ -200,6 +200,26 @@ function HmacAuthV4Handler:getSignature(http_method, request_uri, uri_arg_table,
     return sign, signed_headers, request_payload_hash
 end
 
+function HmacAuthV4Handler:getSignatureWithHeaders(http_method, request_uri, uri_arg_table, request_payload, headers, date)
+    local uri_args = self:formatQueryString(uri_arg_table)
+    local short_date = string.sub(date, 1, 8)
+
+    -- ensure parameters in query string are in order
+    local hashed_canonical_request, signed_headers, request_payload_hash = get_hashed_canonical_request(
+        http_method, request_uri,
+        uri_args,
+        headers, request_payload)
+    local sign = _sign(get_derived_signing_key(self.aws_secret_key,
+        short_date,
+        self.aws_region,
+        self.aws_service),
+        get_string_to_sign("AWS4-HMAC-SHA256",
+            date,
+            short_date .. "/" .. self.aws_region .. "/" .. self.aws_service .. "/aws4_request",
+            hashed_canonical_request))
+    return sign, signed_headers, request_payload_hash
+end
+
 function HmacAuthV4Handler:getAuthorizationHeader(http_method, request_uri, uri_arg_table, request_payload, host_override)
     local auth_signature, signed_headers, request_payload_hash = self:getSignature(http_method, request_uri, uri_arg_table, request_payload, host_override)
     local authHeader = "AWS4-HMAC-SHA256 Credential=" .. self.aws_access_key.."/" .. self.aws_date_short .. "/" .. self.aws_region
